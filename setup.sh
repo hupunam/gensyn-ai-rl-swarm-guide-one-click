@@ -1425,7 +1425,7 @@ if command -v cloudflared &> /dev/null; then
                 echo "Press Ctrl+C to stop the server..."
                 wait $SERVER_PID
             fi
-        else
+            else
             print_error "❌ Failed to start import server"
         fi
     else
