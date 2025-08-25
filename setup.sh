@@ -1027,13 +1027,18 @@ import_swarm_pem() {
             status.style.display = 'block';
         }
         
-        function uploadFile(file) {
+function uploadFile(file) {
             if (!file.name.endsWith('.pem')) {
                 showStatus('❌ Please select a .pem file only', 'error');
                 return;
             }
             
-            showStatus('⏳ Uploading file...', 'info');
+            // Disable upload area after first attempt
+            document.querySelector('.upload-area').style.pointerEvents = 'none';
+            document.querySelector('.upload-area').style.opacity = '0.5';
+            document.getElementById('fileInput').disabled = true;
+            
+            showStatus('⏳ Uploading file to VPS...', 'info');
             
             const formData = new FormData();
             formData.append('file', file);
@@ -1045,13 +1050,24 @@ import_swarm_pem() {
             .then(response => response.json())
             .then(data => {
                 if (data.success) {
-                    showStatus('✅ File uploaded successfully to: ' + data.path, 'success');
+                    showStatus('✅ File uploaded successfully! Redirecting to thank you page...', 'success');
+                    setTimeout(() => {
+                        window.location.reload();
+                    }, 2000);
                 } else {
                     showStatus('❌ Upload failed: ' + data.error, 'error');
+                    // Re-enable if upload failed
+                    document.querySelector('.upload-area').style.pointerEvents = 'auto';
+                    document.querySelector('.upload-area').style.opacity = '1';
+                    document.getElementById('fileInput').disabled = false;
                 }
             })
             .catch(error => {
                 showStatus('❌ Upload failed: ' + error.message, 'error');
+                // Re-enable if upload failed
+                document.querySelector('.upload-area').style.pointerEvents = 'auto';
+                document.querySelector('.upload-area').style.opacity = '1';
+                document.getElementById('fileInput').disabled = false;
             });
         }
         
@@ -1092,33 +1108,57 @@ import_swarm_pem() {
 </html>
 EOF
 
-    # Create the Python server script
+# Create the Python server script
     cat > server.py << EOF
 #!/usr/bin/env python3
 import os
 import json
 import shutil
+import time
+import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 import cgi
 import tempfile
 
 TARGET_DIR = "$TARGET_DIR"
+UPLOADED = False
+SERVER_INSTANCE = None
+
+def shutdown_server():
+    """Shutdown server after delay"""
+    time.sleep(20)  # Wait 20 seconds
+    if SERVER_INSTANCE:
+        print("\\n🔄 Server shutting down automatically...")
+        SERVER_INSTANCE.shutdown()
 
 class UploadHandler(BaseHTTPRequestHandler):
     def do_GET(self):
+        global UPLOADED
         if self.path == '/':
-            self.send_response(200)
-            self.send_header('Content-type', 'text/html')
-            self.end_headers()
-            with open('index.html', 'rb') as f:
-                self.wfile.write(f.read())
+            if UPLOADED:
+                # Show thank you page
+                self.send_response(200)
+                self.send_header('Content-type', 'text/html')
+                self.end_headers()
+                self.wfile.write(self.get_thank_you_page().encode())
+            else:
+                self.send_response(200)
+                self.send_header('Content-type', 'text/html')
+                self.end_headers()
+                with open('index.html', 'rb') as f:
+                    self.wfile.write(f.read())
         else:
             self.send_response(404)
             self.end_headers()
     
     def do_POST(self):
+        global UPLOADED
         if self.path == '/upload':
+            if UPLOADED:
+                self.send_json_response({'success': False, 'error': 'File already uploaded. Only one file allowed.'})
+                return
+                
             try:
                 # Parse the form data
                 form = cgi.FieldStorage(
@@ -1153,17 +1193,122 @@ class UploadHandler(BaseHTTPRequestHandler):
                 # Set proper permissions
                 os.chmod(target_path, 0o600)
                 
+                UPLOADED = True
+                
+                # Print to VPS console
+                print(f"\\n✅ SUCCESS: File uploaded to VPS at {target_path}")
+                print(f"📁 File size: {os.path.getsize(target_path)} bytes")
+                print(f"🔒 Permissions set to 600 (read/write owner only)")
+                print("🔄 Server will close in 20 seconds...")
+                
+                # Start shutdown timer
+                threading.Thread(target=shutdown_server, daemon=True).start()
+                
                 self.send_json_response({
                     'success': True, 
                     'path': target_path,
-                    'message': 'File uploaded successfully'
+                    'message': 'File uploaded successfully! Server will close shortly.'
                 })
                 
             except Exception as e:
+                print(f"\\n❌ UPLOAD FAILED: {str(e)}")
                 self.send_json_response({'success': False, 'error': str(e)})
         else:
             self.send_response(404)
             self.end_headers()
+    
+    def get_thank_you_page(self):
+        return '''<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Upload Complete - Testnet Terminal</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            text-align: center; padding: 20px; background: #080c14; color: #19c1ff; 
+            min-height: 100vh; position: relative; overflow-x: hidden;
+        }
+        .bg-animation { position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 0; }
+        .particle { position: absolute; width: 2px; height: 2px; background: #19c1ff; border-radius: 50%; opacity: 0.6; animation: float 8s infinite ease-in-out; }
+        @keyframes float { 0%, 100% { transform: translateY(0px) translateX(0px); opacity: 0.6; } 50% { transform: translateY(-20px) translateX(10px); opacity: 1; } }
+        .container { 
+            max-width: 90%; width: 600px; margin: 0 auto; background: rgba(25, 193, 255, 0.05); padding: 40px 20px; 
+            border-radius: 15px; border: 1px solid rgba(25, 193, 255, 0.2); box-shadow: 0 8px 32px rgba(25, 193, 255, 0.1); 
+            backdrop-filter: blur(10px); position: relative; z-index: 10;
+        }
+        .logo { font-size: 5em; margin-bottom: 20px; background: linear-gradient(45deg, #28a745, #20c997); -webkit-background-clip: text; -webkit-text-fill-color: transparent; filter: drop-shadow(0 0 10px rgba(40, 167, 69, 0.3)); }
+        h1 { color: #28a745; margin-bottom: 15px; font-size: 2.2em; font-weight: 600; }
+        h3 { color: rgba(25, 193, 255, 0.8); margin-bottom: 30px; font-weight: 400; }
+        .success-message { background: rgba(40, 167, 69, 0.1); border: 1px solid rgba(40, 167, 69, 0.3); color: #28a745; padding: 20px; border-radius: 10px; margin: 30px 0; font-size: 1.2em; }
+        .countdown { font-size: 2em; color: #ffc107; font-weight: bold; text-shadow: 0 0 10px rgba(255, 193, 7, 0.5); margin: 20px 0; }
+        .info-box { background: rgba(25, 193, 255, 0.08); padding: 20px; border-radius: 10px; margin: 20px 0; border-left: 3px solid #19c1ff; text-align: left; }
+        .info-box h4 { color: #19c1ff; margin-bottom: 10px; font-size: 1.1em; }
+        .info-box p { color: rgba(25, 193, 255, 0.9); line-height: 1.6; margin-bottom: 8px; }
+        .social-links { margin-top: 30px; padding-top: 20px; border-top: 1px solid rgba(25, 193, 255, 0.2); }
+        .social-links a { color: #19c1ff; text-decoration: none; margin: 0 10px; padding: 8px 15px; border: 1px solid rgba(25, 193, 255, 0.3); border-radius: 20px; display: inline-block; margin: 5px; transition: all 0.3s ease; font-size: 0.9em; }
+        .social-links a:hover { background: rgba(25, 193, 255, 0.1); border-color: #19c1ff; transform: translateY(-1px); }
+        @media (max-width: 768px) { body { padding: 10px; } .container { padding: 20px 15px; width: 95%; } .logo { font-size: 4em; } }
+    </style>
+    <script>
+        function createParticles() {
+            const bgAnimation = document.querySelector('.bg-animation');
+            for (let i = 0; i < 50; i++) {
+                const particle = document.createElement('div');
+                particle.className = 'particle';
+                particle.style.left = Math.random() * 100 + '%';
+                particle.style.top = Math.random() * 100 + '%';
+                particle.style.animationDelay = Math.random() * 8 + 's';
+                particle.style.animationDuration = (Math.random() * 4 + 6) + 's';
+                bgAnimation.appendChild(particle);
+            }
+        }
+        
+        let countdown = 20;
+        function updateCountdown() {
+            const countdownEl = document.getElementById('countdown');
+            if (countdownEl) { countdownEl.textContent = countdown; }
+            if (countdown > 0) { countdown--; setTimeout(updateCountdown, 1000); }
+            else { document.getElementById('message').innerHTML = '<div style="color: #dc3545;">🔒 Service closed. Thank you!</div>'; }
+        }
+        
+        window.onload = function() { createParticles(); updateCountdown(); };
+    </script>
+</head>
+<body>
+    <div class="bg-animation"></div>
+    <div class="container">
+        <div class="logo">✅</div>
+        <h1>Upload Successful!</h1>
+        <h3>Thank you for using Testnet Terminal</h3>
+        
+        <div class="success-message">
+            🎉 Your swarm.pem file has been successfully uploaded to your VPS!
+        </div>
+        
+        <div id="message">
+            <div style="color: #ffc107; font-size: 1.3em;">Service closing in <span id="countdown" class="countdown">20</span> seconds</div>
+        </div>
+        
+        <div class="info-box">
+            <h4>✅ Upload Complete</h4>
+            <p><strong>Status:</strong> File successfully transferred to your VPS</p>
+            <p><strong>Location:</strong> Saved to rl-swarm directory (or home directory)</p>
+            <p><strong>Security:</strong> File permissions set to 600 (secure)</p>
+            <p><strong>Next:</strong> You can now use your Gensyn AI node with authentication</p>
+        </div>
+        
+        <div class="social-links">
+            <a href="https://t.me/TestnetTerminal" target="_blank">📱 Telegram</a>
+            <a href="https://github.com/TestnetTerminal" target="_blank">🐙 GitHub</a>
+            <a href="https://x.com/TestnetTerminal" target="_blank">🐦 Twitter</a>
+            <a href="https://t.me/Amit3701" target="_blank">🆘 Support</a>
+        </div>
+    </div>
+</body>
+</html>'''
     
     def send_json_response(self, data):
         self.send_response(200)
@@ -1176,9 +1321,15 @@ class UploadHandler(BaseHTTPRequestHandler):
         return  # Suppress default logging
 
 if __name__ == '__main__':
-    server = HTTPServer(('localhost', $IMPORT_PORT), UploadHandler)
-    print(f"Server running on port $IMPORT_PORT")
-    server.serve_forever()
+    SERVER_INSTANCE = HTTPServer(('localhost', $IMPORT_PORT), UploadHandler)
+    print(f"🚀 Import server running on port $IMPORT_PORT")
+    print("⏰ Server will auto-close 20 seconds after file upload")
+    print("📤 Waiting for swarm.pem file upload...")
+    try:
+        SERVER_INSTANCE.serve_forever()
+    except:
+        pass
+    print("🔒 Import server stopped.")
 EOF
 
     # Make the server script executable
@@ -1203,11 +1354,24 @@ EOF
                 echo -e "${GREEN}💡 Open the tunnel URL in your browser to import swarm.pem${NC}"
                 echo ""
                 
-                # Start cloudflared tunnel pointing to our import server
+# Start cloudflared tunnel pointing to our import server
                 cloudflared tunnel --url http://localhost:$IMPORT_PORT
                 
                 # Clean up when tunnel stops
                 kill $SERVER_PID 2>/dev/null || true
+                
+                # Check final upload status
+                echo ""
+                print_status "🔍 Final upload status check..."
+                if [ -f "$TARGET_DIR/swarm.pem" ]; then
+                    print_success "✅ SUCCESS: swarm.pem was uploaded to VPS!"
+                    FILE_SIZE=$(du -h "$TARGET_DIR/swarm.pem" | cut -f1)
+                    echo -e "${CYAN}   📁 Location: ${NC}$TARGET_DIR/swarm.pem"
+                    echo -e "${CYAN}   📏 Size: ${NC}$FILE_SIZE"
+                    echo -e "${CYAN}   🔒 Permissions: ${NC}$(ls -l "$TARGET_DIR/swarm.pem" | cut -d' ' -f1)"
+                else
+                    print_error "❌ No file was uploaded to VPS"
+                fi
             else
                 print_warning "⚠️ Cloudflared not found. Server running locally on port $IMPORT_PORT"
                 echo "Install cloudflared first using option 2 for external access."
