@@ -87,11 +87,12 @@ show_menu() {
     echo -e "${YELLOW}1. 🛠️  Install Gensyn AI Node${NC}"
     echo -e "${YELLOW}2. 🛜 Install Cloudflared and Tunnel${NC}"
     echo -e "${YELLOW}3. ⬇️  Download Swarm.pem File${NC}"
-    echo -e "${PURPLE}4. 🔄 Upgrade Gensyn AI Node${NC}"
-    echo -e "${PURPLE}5. 🗑️  Delete Gensyn AI Node${NC}"
-    echo -e "${RED}6. ❌ Exit${NC}"
+    echo -e "${GREEN}4. 📤 Import Swarm.pem From Local Pc To VPS${NC}"
+    echo -e "${PURPLE}5. 🔄 Upgrade Gensyn AI Node${NC}"
+    echo -e "${RES}6. 🗑️  Delete Gensyn AI Node${NC}"
+    echo -e "${RED}7. ❌ Exit${NC}"
     echo ""
-    echo -n -e "${WHITE}Select an option (1-6): ${NC}"
+    echo -n -e "${WHITE}Select an option (1-7): ${NC}"
 }
 
 # Install Gensyn AI Node
@@ -685,6 +686,570 @@ upgrade_gensyn_node() {
     read -p "Press Enter to return to main menu..."
 }
 
+# Import Swarm.pem file via web interface
+import_swarm_pem() {
+    echo ""
+    echo -e "${GREEN}╔══════════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${GREEN}║                    📤 Import Swarm.pem File 📤                   ║${NC}"
+    echo -e "${GREEN}╚══════════════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+    
+    # Get the current username and directories
+    CURRENT_USER=$(whoami)
+    RL_SWARM_DIR="/home/$CURRENT_USER/rl-swarm"
+    IMPORT_DIR="/home/$CURRENT_USER"
+    
+    print_status "🔍 Setting up import server..."
+    echo -e "${CYAN}📂 Import will save to: ${NC}$RL_SWARM_DIR (if exists) or $IMPORT_DIR"
+    echo ""
+    
+    # Check if rl-swarm directory exists
+    if [ -d "$RL_SWARM_DIR" ]; then
+        TARGET_DIR="$RL_SWARM_DIR"
+        print_success "✅ rl-swarm directory found - files will be imported there"
+    else
+        TARGET_DIR="$IMPORT_DIR"
+        print_warning "⚠️ rl-swarm directory not found - files will be imported to home directory"
+    fi
+    
+    # Find an available port (try 8090, 8091, etc. - avoiding 3000)
+    IMPORT_PORT=8090
+    while lsof -i:$IMPORT_PORT &>/dev/null; do
+        ((IMPORT_PORT++))
+        if [ $IMPORT_PORT -gt 8100 ]; then
+            print_error "❌ No available ports found between 8090-8100"
+            return
+        fi
+    done
+    
+    print_status "🔍 Using port: $IMPORT_PORT"
+    
+    # Create a temporary directory for the import server
+    TEMP_IMPORT_DIR=$(mktemp -d)
+    cd "$TEMP_IMPORT_DIR"
+    
+    # Create the import web interface
+    cat > index.html << 'EOF'
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Import swarm.pem - Testnet Terminal</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            text-align: center; 
+            padding: 20px; 
+            background: #080c14;
+            color: #19c1ff; 
+            min-height: 100vh;
+            position: relative;
+            overflow-x: hidden;
+        }
+        
+        .bg-animation {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 0;
+        }
+        
+        .particle {
+            position: absolute;
+            width: 2px;
+            height: 2px;
+            background: #19c1ff;
+            border-radius: 50%;
+            opacity: 0.6;
+            animation: float 8s infinite ease-in-out;
+        }
+        
+        @keyframes float {
+            0%, 100% { transform: translateY(0px) translateX(0px); opacity: 0.6; }
+            50% { transform: translateY(-20px) translateX(10px); opacity: 1; }
+        }
+        
+        .watermark {
+            position: fixed;
+            bottom: 10px;
+            right: 10px;
+            font-size: 10px;
+            color: rgba(25, 193, 255, 0.3);
+            z-index: 1000;
+            font-weight: bold;
+        }
+        
+        .container { 
+            max-width: 90%;
+            width: 600px;
+            margin: 0 auto; 
+            background: rgba(25, 193, 255, 0.05);
+            padding: 30px 20px;
+            border-radius: 15px;
+            border: 1px solid rgba(25, 193, 255, 0.2);
+            box-shadow: 0 8px 32px rgba(25, 193, 255, 0.1);
+            backdrop-filter: blur(10px);
+            position: relative;
+            z-index: 10;
+        }
+        
+        .logo { 
+            font-size: 4em; 
+            margin-bottom: 20px;
+            background: linear-gradient(45deg, #19c1ff, #0066cc);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            filter: drop-shadow(0 0 10px rgba(25, 193, 255, 0.3));
+        }
+        
+        h1 {
+            color: #19c1ff;
+            margin-bottom: 10px;
+            font-size: 1.8em;
+            font-weight: 600;
+        }
+        
+        h3 {
+            color: rgba(25, 193, 255, 0.8);
+            margin-bottom: 30px;
+            font-weight: 400;
+        }
+        
+        .upload-area {
+            border: 3px dashed rgba(25, 193, 255, 0.3);
+            border-radius: 15px;
+            padding: 40px 20px;
+            margin: 30px 0;
+            transition: all 0.3s ease;
+            background: rgba(25, 193, 255, 0.02);
+            cursor: pointer;
+        }
+        
+        .upload-area:hover, .upload-area.dragover {
+            border-color: #19c1ff;
+            background: rgba(25, 193, 255, 0.08);
+            transform: translateY(-2px);
+        }
+        
+        .upload-icon {
+            font-size: 3em;
+            margin-bottom: 15px;
+            opacity: 0.7;
+        }
+        
+        .upload-text {
+            font-size: 1.1em;
+            margin-bottom: 10px;
+        }
+        
+        .upload-subtext {
+            color: rgba(25, 193, 255, 0.6);
+            font-size: 0.9em;
+        }
+        
+        #fileInput {
+            display: none;
+        }
+        
+        .upload-btn { 
+            background: linear-gradient(45deg, #19c1ff, #0066cc);
+            color: #080c14; 
+            padding: 15px 30px; 
+            border: none;
+            border-radius: 25px; 
+            font-size: 16px; 
+            font-weight: 600;
+            display: inline-block;
+            margin: 20px 10px;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 20px rgba(25, 193, 255, 0.3);
+            cursor: pointer;
+        }
+        
+        .upload-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 30px rgba(25, 193, 255, 0.5);
+        }
+        
+        .status {
+            padding: 15px;
+            border-radius: 10px;
+            margin: 20px 0;
+            display: none;
+        }
+        
+        .status.success {
+            background: rgba(40, 167, 69, 0.1);
+            border: 1px solid rgba(40, 167, 69, 0.3);
+            color: #28a745;
+            display: block;
+        }
+        
+        .status.error {
+            background: rgba(220, 53, 69, 0.1);
+            border: 1px solid rgba(220, 53, 69, 0.3);
+            color: #dc3545;
+            display: block;
+        }
+        
+        .status.info {
+            background: rgba(25, 193, 255, 0.1);
+            border: 1px solid rgba(25, 193, 255, 0.3);
+            color: #19c1ff;
+            display: block;
+        }
+        
+        .info-box { 
+            background: rgba(25, 193, 255, 0.08); 
+            padding: 20px; 
+            border-radius: 10px; 
+            margin: 20px 0; 
+            border-left: 3px solid #19c1ff;
+            text-align: left;
+        }
+        
+        .info-box h4 {
+            color: #19c1ff;
+            margin-bottom: 10px;
+            font-size: 1.1em;
+        }
+        
+        .info-box p {
+            color: rgba(25, 193, 255, 0.9);
+            line-height: 1.6;
+            margin-bottom: 8px;
+        }
+        
+        .social-links {
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid rgba(25, 193, 255, 0.2);
+        }
+        
+        .social-links a {
+            color: #19c1ff;
+            text-decoration: none;
+            margin: 0 10px;
+            padding: 8px 15px;
+            border: 1px solid rgba(25, 193, 255, 0.3);
+            border-radius: 20px;
+            display: inline-block;
+            margin: 5px;
+            transition: all 0.3s ease;
+            font-size: 0.9em;
+        }
+        
+        .social-links a:hover {
+            background: rgba(25, 193, 255, 0.1);
+            border-color: #19c1ff;
+            transform: translateY(-1px);
+        }
+        
+        @media (max-width: 768px) {
+            body { padding: 10px; }
+            .container { 
+                padding: 20px 15px; 
+                width: 95%;
+            }
+            .logo { font-size: 3em; }
+            .upload-area { padding: 30px 15px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="bg-animation"></div>
+    
+    <div class="watermark">
+        Testnet Terminal © 2025
+    </div>
+    
+    <div class="container">
+        <div class="logo">📤</div>
+        <h1>Import Your swarm.pem File</h1>
+        <h3>Testnet Terminal - Gensyn AI Import</h3>
+        
+        <div class="upload-area" onclick="document.getElementById('fileInput').click()">
+            <div class="upload-icon">📁</div>
+            <div class="upload-text">Click here or drag & drop your swarm.pem file</div>
+            <div class="upload-subtext">Only .pem files are accepted</div>
+        </div>
+        
+        <input type="file" id="fileInput" accept=".pem" />
+        
+        <button class="upload-btn" onclick="document.getElementById('fileInput').click()">
+            📂 Browse Files
+        </button>
+        
+        <div id="status" class="status"></div>
+        
+        <div class="info-box">
+            <h4>📋 Import Information</h4>
+            <p><strong>Accepted files:</strong> .pem files only</p>
+            <p><strong>Target location:</strong> Your server's rl-swarm directory</p>
+            <p><strong>File will be renamed to:</strong> swarm.pem</p>
+        </div>
+        
+        <div class="social-links">
+            <a href="https://t.me/TestnetTerminal" target="_blank">📱 Telegram</a>
+            <a href="https://github.com/TestnetTerminal" target="_blank">🐙 GitHub</a>
+            <a href="https://x.com/TestnetTerminal" target="_blank">🐦 Twitter</a>
+        </div>
+    </div>
+    
+    <script>
+        function createParticles() {
+            const bgAnimation = document.querySelector('.bg-animation');
+            for (let i = 0; i < 50; i++) {
+                const particle = document.createElement('div');
+                particle.className = 'particle';
+                particle.style.left = Math.random() * 100 + '%';
+                particle.style.top = Math.random() * 100 + '%';
+                particle.style.animationDelay = Math.random() * 8 + 's';
+                particle.style.animationDuration = (Math.random() * 4 + 6) + 's';
+                bgAnimation.appendChild(particle);
+            }
+        }
+        
+        function showStatus(message, type) {
+            const status = document.getElementById('status');
+            status.className = 'status ' + type;
+            status.innerHTML = message;
+            status.style.display = 'block';
+        }
+        
+        function uploadFile(file) {
+            if (!file.name.endsWith('.pem')) {
+                showStatus('❌ Please select a .pem file only', 'error');
+                return;
+            }
+            
+            showStatus('⏳ Uploading file...', 'info');
+            
+            const formData = new FormData();
+            formData.append('file', file);
+            
+            fetch('/upload', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    showStatus('✅ File uploaded successfully to: ' + data.path, 'success');
+                } else {
+                    showStatus('❌ Upload failed: ' + data.error, 'error');
+                }
+            })
+            .catch(error => {
+                showStatus('❌ Upload failed: ' + error.message, 'error');
+            });
+        }
+        
+        // File input change handler
+        document.getElementById('fileInput').addEventListener('change', function(e) {
+            if (e.target.files.length > 0) {
+                uploadFile(e.target.files[0]);
+            }
+        });
+        
+        // Drag and drop handlers
+        const uploadArea = document.querySelector('.upload-area');
+        
+        uploadArea.addEventListener('dragover', function(e) {
+            e.preventDefault();
+            uploadArea.classList.add('dragover');
+        });
+        
+        uploadArea.addEventListener('dragleave', function(e) {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+        });
+        
+        uploadArea.addEventListener('drop', function(e) {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+            
+            if (e.dataTransfer.files.length > 0) {
+                uploadFile(e.dataTransfer.files[0]);
+            }
+        });
+        
+        window.onload = function() {
+            createParticles();
+        };
+    </script>
+</body>
+</html>
+EOF
+
+    # Create the Python server script
+    cat > server.py << EOF
+#!/usr/bin/env python3
+import os
+import json
+import shutil
+from http.server import HTTPServer, BaseHTTPRequestHandler
+from urllib.parse import urlparse, parse_qs
+import cgi
+import tempfile
+
+TARGET_DIR = "$TARGET_DIR"
+
+class UploadHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == '/':
+            self.send_response(200)
+            self.send_header('Content-type', 'text/html')
+            self.end_headers()
+            with open('index.html', 'rb') as f:
+                self.wfile.write(f.read())
+        else:
+            self.send_response(404)
+            self.end_headers()
+    
+    def do_POST(self):
+        if self.path == '/upload':
+            try:
+                # Parse the form data
+                form = cgi.FieldStorage(
+                    fp=self.rfile,
+                    headers=self.headers,
+                    environ={'REQUEST_METHOD': 'POST'}
+                )
+                
+                if 'file' not in form:
+                    self.send_json_response({'success': False, 'error': 'No file provided'})
+                    return
+                
+                fileitem = form['file']
+                if not fileitem.filename:
+                    self.send_json_response({'success': False, 'error': 'No file selected'})
+                    return
+                
+                if not fileitem.filename.endswith('.pem'):
+                    self.send_json_response({'success': False, 'error': 'Only .pem files are allowed'})
+                    return
+                
+                # Save the file
+                target_path = os.path.join(TARGET_DIR, 'swarm.pem')
+                
+                # Create target directory if it doesn't exist
+                os.makedirs(TARGET_DIR, exist_ok=True)
+                
+                # Write the file
+                with open(target_path, 'wb') as f:
+                    f.write(fileitem.file.read())
+                
+                # Set proper permissions
+                os.chmod(target_path, 0o600)
+                
+                self.send_json_response({
+                    'success': True, 
+                    'path': target_path,
+                    'message': 'File uploaded successfully'
+                })
+                
+            except Exception as e:
+                self.send_json_response({'success': False, 'error': str(e)})
+        else:
+            self.send_response(404)
+            self.end_headers()
+    
+    def send_json_response(self, data):
+        self.send_response(200)
+        self.send_header('Content-type', 'application/json')
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.end_headers()
+        self.wfile.write(json.dumps(data).encode())
+    
+    def log_message(self, format, *args):
+        return  # Suppress default logging
+
+if __name__ == '__main__':
+    server = HTTPServer(('localhost', $IMPORT_PORT), UploadHandler)
+    print(f"Server running on port $IMPORT_PORT")
+    server.serve_forever()
+EOF
+
+    # Make the server script executable
+    chmod +x server.py
+    
+    if command -v python3 &> /dev/null; then
+        print_success "🚀 Starting import server on port $IMPORT_PORT..."
+        print_status "📤 Server will accept .pem file uploads"
+        echo -e "${YELLOW}⚠️ Press Ctrl+C to stop the server${NC}"
+        echo ""
+        
+        # Start Python server in background
+        python3 server.py > /dev/null 2>&1 &
+        SERVER_PID=$!
+        sleep 2
+        
+        # Check if server started successfully
+        if kill -0 $SERVER_PID 2>/dev/null; then
+            if command -v cloudflared &> /dev/null; then
+                print_success "🌐 Starting Cloudflare tunnel for swarm.pem import..."
+                echo -e "${CYAN}📋 The tunnel will provide a secure upload interface${NC}"
+                echo -e "${GREEN}💡 Open the tunnel URL in your browser to import swarm.pem${NC}"
+                echo ""
+                
+                # Start cloudflared tunnel pointing to our import server
+                cloudflared tunnel --url http://localhost:$IMPORT_PORT
+                
+                # Clean up when tunnel stops
+                kill $SERVER_PID 2>/dev/null || true
+            else
+                print_warning "⚠️ Cloudflared not found. Server running locally on port $IMPORT_PORT"
+                echo "Install cloudflared first using option 2 for external access."
+                echo -e "${CYAN}📋 Local access: ${NC}http://localhost:$IMPORT_PORT"
+                echo ""
+                echo "Press Ctrl+C to stop the server..."
+                wait $SERVER_PID
+            fi
+        else
+            print_error "❌ Failed to start import server"
+        fi
+    else
+        print_error "❌ Python3 not found. Cannot start import server."
+    fi
+    
+    # Clean up temporary directory
+    cd "$RL_SWARM_DIR" 2>/dev/null || cd "$IMPORT_DIR"
+    rm -rf "$TEMP_IMPORT_DIR"
+    
+    echo ""
+    print_status "🔍 Checking if swarm.pem was imported..."
+    if [ -f "$TARGET_DIR/swarm.pem" ]; then
+        print_success "✅ swarm.pem found at: $TARGET_DIR/swarm.pem"
+        
+        # Show file info
+        FILE_SIZE=$(du -h "$TARGET_DIR/swarm.pem" | cut -f1)
+        FILE_DATE=$(ls -la "$TARGET_DIR/swarm.pem" | awk '{print $6, $7, $8}')
+        
+        echo ""
+        echo -e "${CYAN}📄 Imported File Information:${NC}"
+        echo -e "${CYAN}   Size: ${NC}$FILE_SIZE"
+        echo -e "${CYAN}   Modified: ${NC}$FILE_DATE"
+        echo -e "${CYAN}   Location: ${NC}$TARGET_DIR/swarm.pem"
+        echo -e "${CYAN}   Permissions: ${NC}$(ls -l "$TARGET_DIR/swarm.pem" | cut -d' ' -f1)"
+    else
+        print_warning "⚠️ No swarm.pem file was imported"
+    fi
+    
+    echo ""
+    read -p "Press Enter to return to main menu..."
+}
+
 # Delete Gensyn Node completely
 delete_gensyn_node() {
     echo ""
@@ -827,17 +1392,20 @@ main() {
                 download_swarm_pem
                 ;;
             4)
+                import_swarm_pem
+                ;;   
+            5)
                 upgrade_gensyn_node
                 ;;
-            5)
+            6)
                 delete_gensyn_node
                 ;;
-            6)
+            7)
                 exit_script
                 ;;
             *)
                 echo ""
-                print_error "❌ Invalid option. Please select 1-6."
+                print_error "❌ Invalid option. Please select 1-7."
                 echo ""
                 read -p "Press Enter to continue..."
                 ;;
