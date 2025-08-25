@@ -1130,6 +1130,10 @@ def shutdown_server():
     time.sleep(20)  # Wait 20 seconds
     if SERVER_INSTANCE:
         print("\\n🔄 Server shutting down automatically...")
+        print("💾 Upload completed successfully!")
+        # Create a flag file to signal upload completion
+        with open("/tmp/upload_complete.flag", "w") as f:
+            f.write("1")
         SERVER_INSTANCE.shutdown()
 
 class UploadHandler(BaseHTTPRequestHandler):
@@ -1334,45 +1338,86 @@ EOF
 
     # Make the server script executable
     chmod +x server.py
-    
-    if command -v python3 &> /dev/null; then
-        print_success "🚀 Starting import server on port $IMPORT_PORT..."
-        print_status "📤 Server will accept .pem file uploads"
-        echo -e "${YELLOW}⚠️ Press Ctrl+C to stop the server${NC}"
-        echo ""
-        
-        # Start Python server in background
-        python3 server.py > /dev/null 2>&1 &
-        SERVER_PID=$!
-        sleep 2
-        
-        # Check if server started successfully
-        if kill -0 $SERVER_PID 2>/dev/null; then
-            if command -v cloudflared &> /dev/null; then
+
+if command -v cloudflared &> /dev/null; then
                 print_success "🌐 Starting Cloudflare tunnel for swarm.pem import..."
                 echo -e "${CYAN}📋 The tunnel will provide a secure upload interface${NC}"
                 echo -e "${GREEN}💡 Open the tunnel URL in your browser to import swarm.pem${NC}"
+                echo -e "${YELLOW}⚠️ Tunnel will auto-close after file upload or 3 minutes${NC}"
                 echo ""
                 
-# Start cloudflared tunnel pointing to our import server
-                cloudflared tunnel --url http://localhost:$IMPORT_PORT
+                # Start cloudflared tunnel in background and get its PID
+                cloudflared tunnel --url http://localhost:$IMPORT_PORT &
+                TUNNEL_PID=$!
                 
-                # Clean up when tunnel stops
+                # Create a monitoring script to check for upload completion or timeout
+                (
+                    TIMEOUT=180  # 3 minutes
+                    ELAPSED=0
+                    
+                    while [ $ELAPSED -lt $TIMEOUT ]; do
+                        sleep 5
+                        ELAPSED=$((ELAPSED + 5))
+                        
+                        # Check if file was uploaded
+                        if [ -f "$TARGET_DIR/swarm.pem" ]; then
+                            echo ""
+                            print_success "✅ File uploaded! Closing tunnel in 20 seconds..."
+                            sleep 20
+                            break
+                        fi
+                        
+                        # Check if processes are still running
+                        if ! kill -0 $TUNNEL_PID 2>/dev/null || ! kill -0 $SERVER_PID 2>/dev/null; then
+                            break
+                        fi
+                    done
+                    
+                    # Kill both processes
+                    echo ""
+                    print_status "🔄 Shutting down tunnel and server..."
+                    kill $TUNNEL_PID 2>/dev/null || true
+                    kill $SERVER_PID 2>/dev/null || true
+                    pkill -f "cloudflared tunnel" 2>/dev/null || true
+                    
+                    # Wait a moment then check final status
+                    sleep 3
+                    echo ""
+                    print_status "🔍 Final upload status check..."
+                    if [ -f "$TARGET_DIR/swarm.pem" ]; then
+                        print_success "✅ SUCCESS: swarm.pem was uploaded to VPS!"
+                        FILE_SIZE=$(du -h "$TARGET_DIR/swarm.pem" | cut -f1)
+                        echo -e "${CYAN}   📁 Location: ${NC}$TARGET_DIR/swarm.pem"
+                        echo -e "${CYAN}   📏 Size: ${NC}$FILE_SIZE"
+                        echo -e "${CYAN}   🔒 Permissions: ${NC}$(ls -l "$TARGET_DIR/swarm.pem" | cut -d' ' -f1)"
+                        echo ""
+                        print_success "🎉 Thank you for using Testnet Terminal!"
+                        echo -e "${GREEN}✨ Your swarm.pem is ready to use with Gensyn AI Node ✨${NC}"
+                    else
+                        print_error "❌ No file was uploaded to VPS"
+                        echo -e "${YELLOW}💡 You can try the import process again${NC}"
+                    fi
+                    
+                    echo ""
+                    echo -e "${CYAN}🔗 Stay Connected:${NC}"
+                    echo -e "${BLUE}📱 Telegram: ${NC}https://t.me/TestnetTerminal"
+                    echo -e "${BLUE}🐙 GitHub: ${NC}https://github.com/TestnetTerminal" 
+                    echo -e "${BLUE}🐦 Twitter: ${NC}https://x.com/TestnetTerminal"
+                    echo -e "${BLUE}🆘 Support: ${NC}https://t.me/Amit3701"
+                    echo ""
+                    
+                ) &
+                MONITOR_PID=$!
+                
+                # Wait for tunnel to finish (either by upload completion or manual Ctrl+C)
+                wait $TUNNEL_PID 2>/dev/null || true
+                
+                # Clean up monitoring process
+                kill $MONITOR_PID 2>/dev/null || true
                 kill $SERVER_PID 2>/dev/null || true
                 
-                # Check final upload status
-                echo ""
-                print_status "🔍 Final upload status check..."
-                if [ -f "$TARGET_DIR/swarm.pem" ]; then
-                    print_success "✅ SUCCESS: swarm.pem was uploaded to VPS!"
-                    FILE_SIZE=$(du -h "$TARGET_DIR/swarm.pem" | cut -f1)
-                    echo -e "${CYAN}   📁 Location: ${NC}$TARGET_DIR/swarm.pem"
-                    echo -e "${CYAN}   📏 Size: ${NC}$FILE_SIZE"
-                    echo -e "${CYAN}   🔒 Permissions: ${NC}$(ls -l "$TARGET_DIR/swarm.pem" | cut -d' ' -f1)"
-                else
-                    print_error "❌ No file was uploaded to VPS"
-                fi
             else
+            
                 print_warning "⚠️ Cloudflared not found. Server running locally on port $IMPORT_PORT"
                 echo "Install cloudflared first using option 2 for external access."
                 echo -e "${CYAN}📋 Local access: ${NC}http://localhost:$IMPORT_PORT"
