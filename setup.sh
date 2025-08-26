@@ -65,7 +65,7 @@ show_banner() {
     echo -e "${BLUE}   ╚═╝   ╚══════╝╚══════╝   ╚═╝   ╚═╝  ╚═══╝╚══════╝   ╚═╝          ╚═╝   ╚══════╝╚═╝  ╚═╝╚═╝     ╚═╝╚═╝╚═╝  ╚═══╝╚═╝  ╚═╝╚══════╝${NC}"
     echo ""
     echo -e "${WHITE}╔══════════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${WHITE}║              🎉 Thank you for using our One-Click Setup! 🎉       ║${NC}"
+    echo -e "${WHITE}║            🎉 Thank you for using our One-Click Setup! 🎉       ║${NC}"
     echo -e "${WHITE}╚══════════════════════════════════════════════════════════════════╝${NC}"
     echo ""
     echo -e "${CYAN}🔗 Our Links:${NC}"
@@ -88,9 +88,10 @@ show_menu() {
     echo -e "${YELLOW}2. 🛜 Install Cloudflared and Tunnel${NC}"
     echo -e "${YELLOW}3. ⬇️  Download Swarm.pem File${NC}"
     echo -e "${YELLOW}4. 📤 Import Swarm.pem From Local Pc To VPS${NC}"
-    echo -e "${PURPLE}5. 🔄 Upgrade Gensyn AI Node${NC}"
-    echo -e "${RED}6. 🗑️  Delete Gensyn AI Node${NC}"
-    echo -e "${RED}7. ❌ Exit${NC}"
+    echo -e "${CYAN}5. 🆔 Find Your Peer ID${NC}"
+    echo -e "${PURPLE}6. 🔄 Upgrade Gensyn AI Node${NC}"
+    echo -e "${RED}7. 🗑️  Delete Gensyn AI Node${NC}"
+    echo -e "${RED}8. ❌ Exit${NC}
     echo ""
     echo -n -e "${WHITE}Select an option (1-7): ${NC}"
 }
@@ -99,7 +100,7 @@ show_menu() {
 install_gensyn_node() {
     echo ""
     echo -e "${PURPLE}╔══════════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${PURPLE}║                    🛠️ Installing Gensyn AI Node 🛠️               ║${NC}"
+    echo -e "${PURPLE}║                    🛠️ Installing Gensyn AI Node 🛠️              ║${NC}"
     echo -e "${PURPLE}╚══════════════════════════════════════════════════════════════════╝${NC}"
     echo ""
 
@@ -1462,11 +1463,150 @@ EOF
     read -p "Press Enter to return to main menu..."
 }
 
+# Find Peer ID
+find_peer_id() {
+    echo ""
+    echo -e "${CYAN}╔══════════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${CYAN}║                    🆔 Find Your Peer ID 🆔                       ║${NC}"
+    echo -e "${CYAN}╚══════════════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+    
+    # Get current user and check for rl-swarm directory
+    CURRENT_USER=$(whoami)
+    RL_SWARM_DIR="/home/$CURRENT_USER/rl-swarm"
+    LOGS_DIR="$RL_SWARM_DIR/logs"
+    
+    # Check if rl-swarm directory exists
+    if [ ! -d "$RL_SWARM_DIR" ]; then
+        print_error "❌ rl-swarm directory not found at: $RL_SWARM_DIR"
+        echo ""
+        print_status "💡 Please run option 1 first to install Gensyn AI Node"
+        echo ""
+        read -p "Press Enter to return to main menu..."
+        return
+    fi
+    
+    # Check if logs directory exists
+    if [ ! -d "$LOGS_DIR" ]; then
+        print_error "❌ logs directory not found at: $LOGS_DIR"
+        echo ""
+        print_status "💡 Please run the node first to generate logs"
+        print_status "🚀 Use option 1 to install/start the node"
+        echo ""
+        read -p "Press Enter to return to main menu..."
+        return
+    fi
+    
+    print_status "🔍 Searching for training log files..."
+    echo -e "${CYAN}📂 Looking in: ${NC}$LOGS_DIR"
+    echo ""
+    
+    # Find training log files
+    TRAINING_LOGS=$(find "$LOGS_DIR" -name "training_*.log" 2>/dev/null)
+    
+    if [ -z "$TRAINING_LOGS" ]; then
+        print_error "❌ No training log files found"
+        echo ""
+        print_status "💡 Possible reasons:"
+        echo "• Node hasn't been started yet"
+        echo "• Node is still initializing"
+        echo "• Training hasn't begun"
+        echo ""
+        print_status "🚀 Try starting the node first using option 1"
+        echo ""
+        read -p "Press Enter to return to main menu..."
+        return
+    fi
+    
+    # Process each training log file
+    for LOG_FILE in $TRAINING_LOGS; do
+        LOG_FILENAME=$(basename "$LOG_FILE")
+        
+        # Extract peer name from filename (remove "training_" prefix and ".log" suffix)
+        PEER_NAME=$(echo "$LOG_FILENAME" | sed 's/training_//; s/\.log$//' | tr '_' ' ')
+        
+        print_status "📄 Found log file: $LOG_FILENAME"
+        echo -e "${CYAN}   📝 Peer Name: ${NC}$PEER_NAME"
+        echo ""
+        
+        # Check if file exists and is readable
+        if [ ! -r "$LOG_FILE" ]; then
+            print_warning "⚠️ Cannot read log file: $LOG_FILE"
+            continue
+        fi
+        
+        print_status "🔍 Extracting Peer ID from log file..."
+        echo ""
+        
+        # Extract Peer ID from the first few lines
+        PEER_ID=$(head -10 "$LOG_FILE" 2>/dev/null | grep -oE 'Qm[A-Za-z0-9]{44,}' | head -1)
+        
+        if [ -n "$PEER_ID" ]; then
+            echo -e "${GREEN}╔══════════════════════════════════════════════════════════════════╗${NC}"
+            echo -e "${GREEN}║                        🎉 Peer ID Found! 🎉                     ║${NC}"
+            echo -e "${GREEN}╚══════════════════════════════════════════════════════════════════╝${NC}"
+            echo ""
+            echo -e "${CYAN}📋 Your Gensyn AI Node Information:${NC}"
+            echo ""
+            echo -e "${YELLOW}🏷️  Peer Name: ${NC}$PEER_NAME"
+            echo -e "${YELLOW}🆔 Peer ID: ${NC}$PEER_ID"
+            echo ""
+            echo -e "${WHITE}════════════════════════════════════════════════════════════════${NC}"
+            echo ""
+            
+            # Show bot information
+            echo -e "${CYAN}🤖 Track Your Progress with Telegram Bot:${NC}"
+            echo ""
+            echo -e "${BLUE}📱 Bot Link: ${NC}https://t.me/GensynUpdate_bot"
+            echo ""
+            echo -e "${GREEN}📋 How to use:${NC}"
+            echo "1. Click the bot link above"
+            echo "2. Start the bot and send your Peer ID:"
+            echo -e "   ${CYAN}$PEER_ID${NC}"
+            echo "3. Or use command: ${CYAN}/add $PEER_ID${NC}"
+            echo ""
+            echo -e "${YELLOW}✨ The bot will provide regular updates about your peer's activity!${NC}"
+            echo ""
+            
+            # Thank you section
+            echo -e "${GREEN}╔══════════════════════════════════════════════════════════════════╗${NC}"
+            echo -e "${GREEN}║                        🙏 Thank You! 🙏                         ║${NC}"
+            echo -e "${GREEN}╚══════════════════════════════════════════════════════════════════╝${NC}"
+            echo ""
+            echo -e "${CYAN}🎉 Thank you for using Testnet Terminal's OneClick Setup!${NC}"
+            echo ""
+            echo -e "${YELLOW}🔗 Stay Connected:${NC}"
+            echo -e "${BLUE}📱 Telegram: ${NC}https://t.me/TestnetTerminal"
+            echo -e "${BLUE}🐙 GitHub: ${NC}https://github.com/TestnetTerminal" 
+            echo -e "${BLUE}🐦 Twitter: ${NC}https://x.com/TestnetTerminal"
+            echo -e "${BLUE}🆘 Support: ${NC}https://t.me/Amit3701"
+            echo ""
+            echo -e "${GREEN}✨ Happy Mining/Training! ✨${NC}"
+            
+        else
+            print_error "❌ Could not find Peer ID in log file"
+            echo ""
+            print_status "💡 This might mean:"
+            echo "• Node is still starting up"
+            echo "• Registration hasn't completed yet"
+            echo "• Log file doesn't contain Peer ID yet"
+            echo ""
+            print_status "🔄 Try running the node for a few minutes and check again"
+        fi
+        
+        echo ""
+        break  # Only process the first/most recent training log
+    done
+    
+    echo ""
+    read -p "Press Enter to return to main menu..."
+}
+
 # Delete Gensyn Node completely
 delete_gensyn_node() {
     echo ""
     echo -e "${RED}╔══════════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${RED}║                    🗑️ Delete Gensyn AI Node 🗑️                   ║${NC}"
+    echo -e "${RED}║                    🗑️ Delete Gensyn AI Node 🗑️                  ║${NC}"
     echo -e "${RED}╚══════════════════════════════════════════════════════════════════╝${NC}"
     echo ""
     
@@ -1569,7 +1709,7 @@ delete_gensyn_node() {
 exit_script() {
     echo ""
     echo -e "${GREEN}╔══════════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${GREEN}║                        👋 Thank You! 👋                          ║${NC}"
+    echo -e "${GREEN}║                        👋 Thank You! 👋                         ║${NC}"
     echo -e "${GREEN}╚══════════════════════════════════════════════════════════════════╝${NC}"
     echo ""
     echo -e "${CYAN}🙏 Thank you for using Testnet Terminal's OneClick Setup!${NC}"
@@ -1607,12 +1747,15 @@ main() {
                 import_swarm_pem
                 ;;   
             5)
-                upgrade_gensyn_node
+                find_peer_id
                 ;;
             6)
-                delete_gensyn_node
+                upgrade_gensyn_node
                 ;;
             7)
+                delete_gensyn_node
+                ;;
+            8)
                 exit_script
                 ;;
             *)
