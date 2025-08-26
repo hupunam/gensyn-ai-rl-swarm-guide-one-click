@@ -91,9 +91,9 @@ show_menu() {
     echo -e "${CYAN}5. 🆔 Find Your Peer ID${NC}"
     echo -e "${PURPLE}6. 🔄 Upgrade Gensyn AI Node${NC}"
     echo -e "${RED}7. 🗑️  Delete Gensyn AI Node${NC}"
-    echo -e "${RED}8. ❌ Exit${NC}
+    echo -e "${RED}8. ❌ Exit${NC}"
     echo ""
-    echo -n -e "${WHITE}Select an option (1-7): ${NC}"
+    echo -n -e "${WHITE}Select an option (1-8): ${NC}"
 }
 
 # Install Gensyn AI Node
@@ -1543,7 +1543,7 @@ find_peer_id() {
         
         if [ -n "$PEER_ID" ]; then
             echo -e "${GREEN}╔══════════════════════════════════════════════════════════════════╗${NC}"
-            echo -e "${GREEN}║                        🎉 Peer ID Found! 🎉                     ║${NC}"
+            echo -e "${GREEN}║                        🎉 Peer ID Found! 🎉                      ║${NC}"
             echo -e "${GREEN}╚══════════════════════════════════════════════════════════════════╝${NC}"
             echo ""
             echo -e "${CYAN}📋 Your Gensyn AI Node Information:${NC}"
@@ -1570,7 +1570,7 @@ find_peer_id() {
             
             # Thank you section
             echo -e "${GREEN}╔══════════════════════════════════════════════════════════════════╗${NC}"
-            echo -e "${GREEN}║                        🙏 Thank You! 🙏                         ║${NC}"
+            echo -e "${GREEN}║                        🙏 Thank You! 🙏                          ║${NC}"
             echo -e "${GREEN}╚══════════════════════════════════════════════════════════════════╝${NC}"
             echo ""
             echo -e "${CYAN}🎉 Thank you for using Testnet Terminal's OneClick Setup!${NC}"
