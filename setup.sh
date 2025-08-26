@@ -128,11 +128,10 @@ install_gensyn_node() {
 
     # Check if screen session already exists
     if screen -list | grep -q "gensyn"; then
-        print_warning "Screen session 'gensyn' already exists. Please stop it manually first."
-        echo -e "${YELLOW}To stop: screen -r gensyn, then Ctrl+C, then exit${NC}"
-        echo ""
-        read -p "Press Enter to return to main menu..."
-        return
+        print_warning "Screen session 'gensyn' already exists. Stopping the node only (keeping session)..."
+        screen -S gensyn -X stuff $'\003'  # Send Ctrl+C gently
+        sleep 3
+        print_success "✅ Node stopped (session preserved)"
     fi
 
     print_status "🖥️ Starting screen session 'gensyn'..."
@@ -143,8 +142,13 @@ install_gensyn_node() {
 
     echo '📁 Setting up RL-SWARM...'
 
-# Remove existing directory if it exists
+    # Remove existing directory if it exists but PRESERVE swarm.pem
     if [ -d 'rl-swarm' ]; then
+        echo '🔐 Backing up swarm.pem if it exists...'
+        if [ -f 'rl-swarm/swarm.pem' ]; then
+            cp rl-swarm/swarm.pem ./swarm_backup.pem
+            echo '✅ swarm.pem backed up'
+        fi
         echo '🗑️  Removing existing rl-swarm directory...'
         rm -rf rl-swarm
     fi
@@ -152,6 +156,14 @@ install_gensyn_node() {
     echo '📁 Cloning RL-SWARM repo...'
     git clone https://github.com/gensyn-ai/rl-swarm.git
     cd rl-swarm
+
+    # Restore swarm.pem if backup exists
+    if [ -f '../swarm_backup.pem' ]; then
+        echo '🔐 Restoring swarm.pem from backup...'
+        cp ../swarm_backup.pem ./swarm.pem
+        rm ../swarm_backup.pem
+        echo '✅ swarm.pem restored'
+    fi
 
     echo '🐍 Setting up Python virtual environment...'
     python3 -m venv .venv
@@ -165,172 +177,94 @@ install_gensyn_node() {
     pip freeze
 
     echo ''
-echo '🔑 Checking for swarm.pem file...'
-    
-    # First check in current rl-swarm directory
+    echo '🔑 Checking for swarm.pem file...'
     if [ -f 'swarm.pem' ]; then
-        echo '✅ Found swarm.pem file in rl-swarm directory, proceeding with authentication...'
+        echo '✅ Found swarm.pem file, proceeding with authentication...'
     else
-        # Check in home directory
-        if [ -f '../swarm.pem' ]; then
-            echo '✅ Found swarm.pem in home directory, moving to rl-swarm...'
-            mv ../swarm.pem ./swarm.pem
-            echo '✅ swarm.pem moved successfully, proceeding with authentication...'
-        else
-            echo '⚠️  No swarm.pem found in rl-swarm or home directory.'
-            echo ''
-            echo '📤 Opening import interface for swarm.pem upload...'
-            echo '⏳ Waiting 40 seconds for you to upload the file...'
-            echo '✅ Press 1 and Enter to continue without swarm.pem'
-            echo '⏭️  Or wait 40 seconds to open import interface'
-            echo ''
+        echo '⚠️  No swarm.pem found in the current directory.'
+        echo '📂 Please copy your swarm.pem file to: \$(pwd)'
+        echo '📋 Full path: \$(pwd)/swarm.pem'
+        echo ''
+        echo '⏳ Waiting 50 seconds for you to copy the file...'
+        echo '✅ Press 1 and Enter if you have copied the file to continue immediately'
+        echo '⏭️  Or wait 50 seconds to continue automatically'
+        echo ''
+        
+        # Countdown with user input option
+        for i in \$(seq 50 -1 1); do
+            printf \"\\r⏰ Waiting: %02d seconds (Press 1 to continue)\" \$i
             
-            # Countdown with user input option
-            for i in \$(seq 40 -1 1); do
-                printf \"\\r⏰ Waiting: %02d seconds (Press 1 to skip)\" \$i
-                
-                # Check for user input with timeout
-                if read -t 1 -n 1 user_input 2>/dev/null; then
-                    if [ \"\$user_input\" = \"1\" ]; then
-                        echo \"\"
-                        echo \"⚡ Continuing without swarm.pem...\"
-                        break
-                    fi
-                done
-            done
-            echo \"\"
-            
-            # If user didn't press 1, start import interface
-            if [ \"\$user_input\" != \"1\" ]; then
-                echo '📤 Starting swarm.pem import interface...'
-                
-                # Create import interface in background
-                cd ..
-                screen -S import -dm bash -c \"
-                    echo '📤 Setting up import interface...'
-                    python3 -c '
-import os
-import json
-import shutil
-from http.server import HTTPServer, BaseHTTPRequestHandler
-import cgi
-import threading
-import time
-
-TARGET_DIR = \"$RL_SWARM_DIR\"
-
-class UploadHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        if self.path == \"/\":
-            self.send_response(200)
-            self.send_header(\"Content-type\", \"text/html\")
-            self.end_headers()
-            self.wfile.write(b\"\"\"<!DOCTYPE html><html><head><title>Import swarm.pem</title><style>body{font-family:Arial;text-align:center;padding:20px;background:#080c14;color:#19c1ff;}h1{color:#19c1ff;}input{margin:20px;padding:10px;}.btn{background:#19c1ff;color:#080c14;padding:10px 20px;border:none;border-radius:5px;cursor:pointer;}</style></head><body><h1>Upload swarm.pem</h1><input type=\"file\" id=\"file\" accept=\".pem\"><br><button class=\"btn\" onclick=\"upload()\">Upload</button><div id=\"status\"></div><script>function upload(){var f=document.getElementById(\"file\").files[0];if(!f||!f.name.endsWith(\".pem\")){document.getElementById(\"status\").innerHTML=\"❌ Please select a .pem file\";return;}var fd=new FormData();fd.append(\"file\",f);fetch(\"/upload\",{method:\"POST\",body:fd}).then(r=>r.json()).then(d=>{if(d.success){document.getElementById(\"status\").innerHTML=\"✅ Upload successful! Closing...\";setTimeout(()=>window.close(),2000);}else{document.getElementById(\"status\").innerHTML=\"❌ Error: \"+d.error;}});}</script></body></html>\"\"\")
-    
-    def do_POST(self):
-        if self.path == \"/upload\":
-            try:
-                form = cgi.FieldStorage(fp=self.rfile, headers=self.headers, environ={\"REQUEST_METHOD\": \"POST\"})
-                
-                if \"file\" not in form:
-                    self.send_json_response({\"success\": False, \"error\": \"No file provided\"})
-                    return
-                
-                fileitem = form[\"file\"]
-                if not fileitem.filename or not fileitem.filename.endswith(\".pem\"):
-                    self.send_json_response({\"success\": False, \"error\": \"Only .pem files allowed\"})
-                    return
-                
-                target_path = os.path.join(TARGET_DIR, \"swarm.pem\")
-                os.makedirs(TARGET_DIR, exist_ok=True)
-                
-                with open(target_path, \"wb\") as f:
-                    f.write(fileitem.file.read())
-                
-                os.chmod(target_path, 0o600)
-                print(f\"✅ File uploaded: {target_path}\")
-                
-                self.send_json_response({\"success\": True, \"path\": target_path})
-                
-                # Signal upload complete and shutdown
-                threading.Thread(target=lambda: (time.sleep(2), os._exit(0)), daemon=True).start()
-                
-            except Exception as e:
-                self.send_json_response({\"success\": False, \"error\": str(e)})
-    
-    def send_json_response(self, data):
-        self.send_response(200)
-        self.send_header(\"Content-type\", \"application/json\")
-        self.end_headers()
-        self.wfile.write(json.dumps(data).encode())
-    
-    def log_message(self, format, *args): return
-
-# Find available port
-port = 8090
-while os.system(f\"lsof -i:{port} >/dev/null 2>&1\") == 0:
-    port += 1
-
-print(f\"🚀 Import server running on port {port}\")
-
-# Start cloudflare tunnel
-os.system(f\"cloudflared tunnel --url http://localhost:{port} &\")
-time.sleep(3)
-print(\"🌐 Tunnel started. Upload your swarm.pem file.\")
-
-try:
-    server = HTTPServer((\"localhost\", port), UploadHandler)
-    server.serve_forever()
-except: pass
-                    '
-                \"
-                
-                echo '⏳ Waiting for file upload (checking every 5 seconds)...'
-                
-                # Monitor for uploaded file
-                for check in \$(seq 1 24); do  # Check for 2 minutes max
-                    if [ -f \"$RL_SWARM_DIR/swarm.pem\" ]; then
-                        echo ''
-                        echo '✅ swarm.pem file uploaded successfully!'
-                        screen -S import -X quit 2>/dev/null || true
-                        pkill -f cloudflared 2>/dev/null || true
-                        break
-                    fi
-                    sleep 5
-                    printf \"\\r⏰ Waiting for upload... (%d/24)\" \$check
-                done
-                echo ''
-                
-                cd rl-swarm
-                
-                # Final check after import attempt
-                if [ -f 'swarm.pem' ]; then
-                    echo '✅ Great! swarm.pem file found, proceeding with authentication...'
-                else
-                    echo '⚠️ No swarm.pem uploaded. Continuing without authentication...'
-                    echo '🔄 You can add it later and restart the node.'
+            # Check for user input with timeout
+            if read -t 1 -n 1 user_input 2>/dev/null; then
+                if [ \"\$user_input\" = \"1\" ]; then
+                    echo \"\"
+                    echo \"⚡ Continuing early...\"
+                    break
                 fi
             fi
+        done
+        echo \"\"
+        
+        # Check again for swarm.pem after the wait
+        if [ -f 'swarm.pem' ]; then
+            echo '✅ Great! Found swarm.pem file, proceeding with authentication...'
+        else
+            echo '⚠️  Still no swarm.pem found. Continuing without authentication...'
+            echo '🔄 You can add it later and restart the swarm.'
         fi
     fi
-    
+
     echo ''
     echo '🚀 Starting the swarm node...'
     chmod +x run_rl_swarm.sh 2>/dev/null || true
 
     # Create a loop to handle restarts gracefully
-    echo '🚀 Starting the swarm node...'
-        ./run_rl_swarm.sh
+    while true; do
+        echo '▶️  Starting/Restarting swarm node...'
+        if ./run_rl_swarm.sh; then
+            echo '✅ Swarm completed successfully.'
+        else
+            echo '⏸️  Swarm stopped or interrupted.'
+        fi
         
         echo ''
-        echo '⏹️  Node execution completed.'
-        echo '📋 Screen session remains active. You can:'
-        echo '   ./run_rl_swarm.sh  - Run node again'
-        echo '   ls -la             - List files' 
-        echo '   exit               - Exit screen session'
+        echo '🔄 Node stopped. Choose action:'
+        echo '1️⃣  Press 1 + Enter to restart the node'
+        echo '2️⃣  Press 2 + Enter to exit to shell (files preserved)'
+        echo '⏳ Auto-restart in 30 seconds...'
+        echo ''
         
-        # Keep shell active permanently
-        bash
+        # Countdown with user choice
+        for i in \$(seq 30 -1 1); do
+            printf \"\\r⏰ Auto-restart in: %02d seconds (1=restart now, 2=shell)\" \$i
+            if read -t 1 -n 1 user_choice 2>/dev/null; then
+                if [ \"\$user_choice\" = \"1\" ]; then
+                    echo \"\"
+                    echo \"🔄 Restarting node...\"
+                    break
+                elif [ \"\$user_choice\" = \"2\" ]; then
+                    echo \"\"
+                    echo \"🐚 Dropping to shell. All files preserved.\"
+                    echo \"📋 To restart node: ./run_rl_swarm.sh\"
+                    echo \"🚪 To exit screen: type 'exit'\"
+                    break 2
+                fi
+            fi
+        done
+        echo \"\"
+        
+        if [ \"\$user_choice\" = \"2\" ]; then
+            break
+        fi
+    done
+    
+    # Keep shell active if user chose option 2
+    echo '🖥️  Shell ready. All files are preserved.'
+    echo '📋 Commands available:'
+    echo '   ./run_rl_swarm.sh  - Start the swarm node'
+    echo '   ls -la             - List files'
+    echo '   exit               - Exit screen session'
+    bash
     "
 
     sleep 3
@@ -690,16 +624,45 @@ upgrade_gensyn_node() {
         
         echo '🚀 Starting the upgraded swarm node...'
         chmod +x run_rl_swarm.sh 2>/dev/null || true
-
-        echo '🚀 Starting upgraded node...'
-        ./run_rl_swarm.sh
         
-        echo ''
-        echo '⏹️  Node execution completed.'
-        echo '📋 Screen session remains active.'
-        echo '   ./run_rl_swarm.sh  - Run node again'
-        echo '   exit               - Exit screen session'
+        while true; do
+            echo '▶️  Starting/Restarting swarm node...'
+            if ./run_rl_swarm.sh; then
+                echo '✅ Swarm completed successfully.'
+            else
+                echo '⏸️  Swarm stopped or interrupted.'
+            fi
+            
+            echo ''
+            echo '🔄 Node stopped. Choose action:'
+            echo '1️⃣  Press 1 + Enter to restart the node'
+            echo '2️⃣  Press 2 + Enter to exit to shell (files preserved)'
+            echo '⏳ Auto-restart in 30 seconds...'
+            echo ''
+            
+            for i in \$(seq 30 -1 1); do
+                printf \"\\r⏰ Auto-restart in: %02d seconds (1=restart, 2=shell)\" \$i
+                if read -t 1 -n 1 user_choice 2>/dev/null; then
+                    if [ \"\$user_choice\" = \"1\" ]; then
+                        echo \"\"
+                        echo \"🔄 Restarting node...\"
+                        break
+                    elif [ \"\$user_choice\" = \"2\" ]; then
+                        echo \"\"
+                        echo \"🐚 Shell ready. All files preserved.\"
+                        break 2
+                    fi
+                fi
+            done
+            echo \"\"
+            
+            if [ \"\$user_choice\" = \"2\" ]; then
+                break
+            fi
+        done
         
+        echo '🖥️  Shell ready. All files preserved.'
+        echo '📋 Commands: ./run_rl_swarm.sh (restart), exit (quit)'
         bash
         "
         print_success "✅ New screen session created with upgraded node"
