@@ -1563,7 +1563,7 @@ find_peer_id() {
             echo "1. Click the bot link above"
             echo "2. Start the bot and send your Peer ID:"
             echo -e "   ${CYAN}$PEER_ID${NC}"
-            echo "3. Or use command: ${CYAN}/add $PEER_ID${NC}"
+            echo "3. Or use command: /add $PEER_ID"
             echo ""
             echo -e "${YELLOW}✨ The bot will provide regular updates about your peer's activity!${NC}"
             echo ""
