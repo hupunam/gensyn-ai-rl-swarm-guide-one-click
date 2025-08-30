@@ -96,22 +96,47 @@ install_yt_dlp() {
         if command_exists python3; then
             show_info "Creating virtual environment for yt-dlp..."
             local venv_path="$HOME/.yt-dlp-venv"
-            python3 -m venv "$venv_path" 2>/dev/null && {
-                source "$venv_path/bin/activate"
-                pip install yt-dlp && {
-                    deactivate
-                    # Create a wrapper script
-                    echo '#!/bin/bash' > "$HOME/.local/bin/yt-dlp" 2>/dev/null || {
-                        mkdir -p "$HOME/.local/bin"
-                        echo '#!/bin/bash' > "$HOME/.local/bin/yt-dlp"
-                    }
-                    echo "source $venv_path/bin/activate && $venv_path/bin/yt-dlp \"\$@\" && deactivate" >> "$HOME/.local/bin/yt-dlp"
+            
+            # Ensure python3-full is installed for venv
+            sudo apt install -y python3-full python3-venv 2>/dev/null
+            
+            # Remove existing venv if corrupted
+            [ -d "$venv_path" ] && rm -rf "$venv_path"
+            
+            # Create fresh virtual environment
+            if python3 -m venv "$venv_path" 2>/dev/null; then
+                show_info "Virtual environment created successfully"
+                
+                # Activate and install
+                if source "$venv_path/bin/activate" && "$venv_path/bin/pip" install --upgrade pip && "$venv_path/bin/pip" install yt-dlp; then
+                    # Create wrapper script
+                    mkdir -p "$HOME/.local/bin"
+                    cat > "$HOME/.local/bin/yt-dlp" << 'EOF'
+#!/bin/bash
+VENV_PATH="$HOME/.yt-dlp-venv"
+if [ -f "$VENV_PATH/bin/yt-dlp" ]; then
+    "$VENV_PATH/bin/yt-dlp" "$@"
+else
+    echo "yt-dlp virtual environment not found. Please reinstall."
+    exit 1
+fi
+EOF
                     chmod +x "$HOME/.local/bin/yt-dlp"
-                    export PATH="$HOME/.local/bin:$PATH"
+                    
+                    # Add to PATH if not already there
+                    if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
+                        export PATH="$HOME/.local/bin:$PATH"
+                        echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.bashrc"
+                    fi
+                    
                     show_success "yt-dlp installed in virtual environment"
                     return 0
-                }
-            }
+                else
+                    show_warning "Failed to install yt-dlp in virtual environment"
+                fi
+            else
+                show_warning "Failed to create virtual environment"
+            fi
         fi
         
         # Method 4: Direct download (last resort)
@@ -162,7 +187,7 @@ install_dependencies() {
         sudo apt update && sudo apt upgrade -y || { handle_error "Failed to update packages"; return 1; }
         
         show_loading "Installing required packages" 5
-        sudo apt install curl iptables build-essential git wget lz4 jq make gcc postgresql-client nano automake autoconf tmux htop nvme-cli libgbm1 pkg-config libssl-dev tar clang bsdmainutils ncdu unzip libleveldb-dev libclang-dev ninja-build python3-pip python3-venv pipx -y || { handle_error "Failed to install packages"; return 1; }
+        sudo apt install curl iptables build-essential git wget lz4 jq make gcc postgresql-client nano automake autoconf tmux htop nvme-cli libgbm1 pkg-config libssl-dev tar clang bsdmainutils ncdu unzip libleveldb-dev libclang-dev ninja-build python3-pip python3-venv python3-full pipx -y || { handle_error "Failed to install packages"; return 1; }
     elif [ "$os_type" = "mac" ]; then
         show_info "Installing Homebrew if not present..."
         if ! command_exists brew; then
@@ -372,14 +397,24 @@ download_youtube() {
             echo -e "${YELLOW}Installation options:${NC}"
             echo -e "${CYAN}• Ubuntu/Debian: sudo apt install yt-dlp${NC}"
             echo -e "${CYAN}• Using pipx: pipx install yt-dlp${NC}"
+            echo -e "${CYAN}• Virtual env: python3 -m venv ~/.yt-dlp-venv && source ~/.yt-dlp-venv/bin/activate && pip install yt-dlp${NC}"
             echo -e "${CYAN}• macOS: brew install yt-dlp${NC}"
             read -p "Press Enter to continue..."
             return 1
         }
         
-        # Update PATH if we installed in ~/.local/bin
+        # Reload PATH and check again
+        source "$HOME/.bashrc" 2>/dev/null || true
         if [ -f "$HOME/.local/bin/yt-dlp" ]; then
             export PATH="$HOME/.local/bin:$PATH"
+        fi
+        
+        # Final check
+        if ! command_exists yt-dlp; then
+            show_warning "yt-dlp installation may have succeeded but is not in PATH"
+            show_info "You may need to restart your terminal or run: source ~/.bashrc"
+            read -p "Press Enter to continue..."
+            return 1
         fi
     fi
     
